@@ -37,6 +37,20 @@ module API
       class UserRepresenter < ::API::Decorators::Single
         include AvatarHelper
 
+        class_attribute :link_conditions
+        self.link_conditions = {}
+
+        def self.link_condition(name, condition)
+          link_conditions[name] = condition
+        end
+
+        class_attribute :property_conditions
+        self.property_conditions = {}
+
+        def self.property_condition(name, condition)
+          property_conditions[name] = condition
+        end
+
         def self.create(user, current_user:)
           new(user, current_user: current_user)
         end
@@ -55,40 +69,50 @@ module API
         end
 
         link :updateImmediately do
-          next unless current_user_is_admin
           {
             href: api_v3_paths.user(represented.id),
             title: "Update #{represented.login}",
             method: :patch
           }
         end
+        link_condition :updateImmediately, ->() {
+          current_user_is_admin
+        }
 
         link :lock do
-          next unless current_user_is_admin && represented.lockable?
+          next unless represented.lockable?
           {
             href: api_v3_paths.user_lock(represented.id),
             title: "Set lock on #{represented.login}",
             method: :post
           }
         end
+        link_condition :lock, ->() {
+          current_user_is_admin
+        }
 
         link :unlock do
-          next unless current_user_is_admin && represented.activatable?
+          next unless represented.activatable?
           {
             href: api_v3_paths.user_lock(represented.id),
             title: "Remove lock on #{represented.login}",
             method: :delete
           }
         end
+        link_condition :lock, ->() {
+          current_user_is_admin
+        }
 
         link :delete do
-          next unless current_user_can_delete_represented?
           {
             href: api_v3_paths.user(represented.id),
             title: "Delete #{represented.login}",
             method: :delete
           }
         end
+        link_condition :lock, ->() {
+          current_user_can_delete_represented?
+        }
 
         property :id,
                  render_nil: true
@@ -96,16 +120,18 @@ module API
                  exec_context: :decorator,
                  render_nil: false,
                  getter: ->(*) { represented.login },
-                 setter: ->(fragment:, represented:, **) { represented.login = fragment },
-                 if: ->(*) { current_user_is_admin_or_self }
+                 setter: ->(fragment:, represented:, **) { represented.login = fragment }
+        property_condition :login, ->() { current_user_is_admin_or_self }
+
         property :admin,
                  exec_context: :decorator,
                  render_nil: false,
                  getter: ->(*) {
                    represented.admin?
                  },
-                 setter: ->(fragment:, represented:, **) { represented.admin = fragment },
-                 if: ->(*) { current_user_is_admin }
+                 setter: ->(fragment:, represented:, **) { represented.admin = fragment }
+        property_condition :admin, ->() { current_user_is_admin }
+
         property :subtype,
                  getter: ->(*) { type },
                  render_nil: true
@@ -113,14 +139,16 @@ module API
                  exec_context: :decorator,
                  getter: ->(*) { represented.firstname },
                  setter: ->(fragment:, represented:, **) { represented.firstname = fragment },
-                 render_nil: false,
-                 if: ->(*) { current_user_is_admin_or_self }
+                 render_nil: false
+        property_condition :firstName, ->() { current_user_is_admin_or_self }
+
         property :lastName,
                  exec_context: :decorator,
                  getter: ->(*) { represented.lastname },
                  setter: ->(fragment:, represented:, **) { represented.lastname = fragment },
-                 render_nil: false,
-                 if: ->(*) { current_user_is_admin_or_self }
+                 render_nil: false
+        property_condition :lastName, ->() { current_user_is_admin_or_self }
+
         property :name,
                  render_nil: true
         property :mail,
@@ -140,27 +168,30 @@ module API
                  exec_context: :decorator,
                  as: 'createdAt',
                  getter: ->(*) { datetime_formatter.format_datetime(represented.created_on) },
-                 render_nil: false,
-                 if: ->(*) { current_user_is_admin_or_self }
+                 render_nil: false
+        property_condition :created_on, ->() { current_user_is_admin_or_self }
+
         property :updated_on,
                  exec_context: :decorator,
                  as: 'updatedAt',
                  getter: ->(*) { datetime_formatter.format_datetime(represented.updated_on) },
-                 render_nil: false,
-                 if: ->(*) { current_user_is_admin_or_self }
+                 render_nil: false
+        property_condition :created_on, ->() { current_user_is_admin_or_self }
+
         property :status,
                  getter: ->(*) { status_name },
                  setter: ->(fragment:, represented:, **) { represented.status = User::STATUSES[fragment.to_sym] },
                  render_nil: true
 
         link :auth_source do
-          next unless represented.is_a?(User) && represented.auth_source && current_user.admin?
+          next unless represented.is_a?(User) && represented.auth_source
 
           {
             href: "/api/v3/auth_sources/#{represented.auth_source_id}",
             title: represented.auth_source.name
           }
         end
+        link_condition :auth_source, ->() { current_user_is_admin }
 
         property :identity_url,
                  exec_context: :decorator,
@@ -168,7 +199,8 @@ module API
                  getter: ->(*) { represented.identity_url },
                  setter: ->(fragment:, represented:, **) { represented.identity_url = fragment },
                  render_nil: true,
-                 if: ->(*) { represented.is_a?(User) && current_user_is_admin_or_self }
+                 if: ->(*) { represented.is_a?(User) }
+        property_condition :identity_url, ->() { current_user_is_admin_or_self }
 
         # Write-only properties
 
@@ -227,6 +259,23 @@ module API
 
         def current_user_is_admin
           current_user.admin?
+        end
+
+        def to_json(*args)
+          json_rep = OpenProject::Cache.fetch(represented) do
+            super
+          end
+
+          hash_rep = ::JSON::load(json_rep)
+
+          link_conditions.each do |name, condition|
+            hash_rep['_links'].delete(name.to_s) unless instance_exec(&condition)
+          end
+          property_conditions.each do |name, condition|
+            hash_rep.delete(name.to_s) unless instance_exec(&condition)
+          end
+
+          ::JSON::dump(hash_rep)
         end
 
         private

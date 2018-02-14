@@ -37,7 +37,6 @@ module API
         self_link
 
         class_attribute :link_conditions
-
         self.link_conditions = {}
 
         def self.link_condition(name, condition)

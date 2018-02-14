@@ -36,14 +36,34 @@ module API
       class ProjectRepresenter < ::API::Decorators::Single
         self_link
 
-        link :createWorkPackage do
-          next unless current_user_allowed_to(:add_work_packages, context: represented)
+        class_attribute :link_conditions
 
+        self.link_conditions = {}
+
+        def self.link_condition(name, condition)
+          link_conditions[name] = condition
+        end
+
+        def self.add_work_packages_lambda
+          ->() {
+            @add_work_packages_lambda ||= current_user_allowed_to(:add_work_packages, context: represented)
+          }
+        end
+
+        def self.view_types_lambda
+          ->() {
+            current_user_allowed_to(:view_work_packages, context: represented) ||
+              current_user_allowed_to(:manage_types, context: represented)
+          }
+        end
+
+        link :createWorkPackage do
           {
             href: api_v3_paths.create_project_work_package_form(represented.id),
             method: :post
           }
         end
+        link_condition :createWorkPackage, add_work_packages_lambda
 
         link :createWorkPackageImmediate do
           next unless current_user_allowed_to(:add_work_packages, context: represented)
@@ -53,6 +73,7 @@ module API
             method: :post
           }
         end
+        link_condition :createWorkPackageImmediate, add_work_packages_lambda
 
         link 'categories' do
           { href: api_v3_paths.categories(represented.id) }
@@ -63,11 +84,9 @@ module API
         end
 
         link 'types' do
-          next unless current_user_allowed_to(:view_work_packages, context: represented) ||
-                      current_user_allowed_to(:manage_types, context: represented)
-
           { href: api_v3_paths.types_by_project(represented.id) }
         end
+        link_condition :types, view_types_lambda
 
         property :id, render_nil: true
         property :identifier,   render_nil: true
@@ -92,6 +111,24 @@ module API
 
         self.to_eager_load = [:project_type]
         self.checked_permissions = [:add_work_packages]
+
+        def to_json(*args)
+          json_rep = OpenProject::Cache.fetch(represented) do
+            super
+          end
+
+          hash_rep = ::JSON::load(json_rep)
+
+          link_conditions.each do |name, condition|
+            displayed = instance_exec(&condition)
+
+            unless displayed
+              hash_rep['_links'].delete(name.to_s)
+            end
+          end
+
+          ::JSON::dump(hash_rep)
+        end
       end
     end
   end

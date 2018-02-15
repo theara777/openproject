@@ -35,12 +35,12 @@ module API
         def full_work_packages(ids_in_order)
           wps = add_eager_loading(WorkPackage.where(id: ids_in_order), current_user).to_a
 
-          eager_load_ancestry(wps, ids_in_order)
-          eager_load_user_custom_values(wps)
-          eager_load_version_custom_values(wps)
-          eager_load_list_custom_values(wps)
+          #eager_load_ancestry(wps, ids_in_order)
+          #eager_load_user_custom_values(wps)
+          #eager_load_version_custom_values(wps)
+          #eager_load_list_custom_values(wps)
 
-          wps = ::API::V3::WorkPackages::CustomActions::CustomActionsWrapper.wrap(wps, current_user)
+          #wps = ::API::V3::WorkPackages::CustomActions::CustomActionsWrapper.wrap(wps, current_user)
 
           wps.sort_by { |wp| ids_in_order.index(wp.id) }
         end

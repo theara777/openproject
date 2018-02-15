@@ -34,6 +34,20 @@ module API
       class WorkPackageRepresenter < ::API::Decorators::Single
         include API::Decorators::LinkedResource
 
+        class_attribute :link_conditions
+        self.link_conditions = {}
+
+        def self.link_condition(name, condition)
+          link_conditions[name] = condition
+        end
+
+        class_attribute :property_conditions
+        self.property_conditions = {}
+
+        def self.property_condition(name, condition)
+          property_conditions[name] = condition
+        end
+
         class << self
           def create_class(work_package)
             injector_class = ::API::V3::Utilities::CustomFieldInjector
@@ -49,14 +63,14 @@ module API
           end
         end
 
-        def initialize(model, current_user:, embed_links: false)
-          # Define all accessors on the customizable as they
-          # will be used afterwards anyway. Otherwise, we will have to
-          # go through method_missing which will take more time.
-          model.define_all_custom_field_accessors
+        #def initialize(model, current_user:, embed_links: false)
+        #  # Define all accessors on the customizable as they
+        #  # will be used afterwards anyway. Otherwise, we will have to
+        #  # go through method_missing which will take more time.
+        #  model.define_all_custom_field_accessors
 
-          super
-        end
+        #  super
+        #end
 
         self_link title_getter: ->(*) { represented.subject }
 
@@ -591,17 +605,39 @@ module API
         self.to_eager_load = [{ children: { project: :enabled_modules } },
                               { parent: { project: :enabled_modules } },
                               { project: %i(enabled_modules work_package_custom_fields) },
-                              :status,
-                              :priority,
-                              { type: :custom_fields },
-                              :fixed_version,
-                              { custom_values: :custom_field },
-                              :author,
-                              :assigned_to,
-                              :responsible,
-                              :watcher_users,
-                              :category,
-                              :attachments]
+                              { type: :custom_fields }]
+
+        #self.to_eager_load = [{ children: { project: :enabled_modules } },
+        #                      { parent: { project: :enabled_modules } },
+        #                      { project: %i(enabled_modules work_package_custom_fields) },
+        #                      :status,
+        #                      :priority,
+        #                      { type: :custom_fields },
+        #                      :fixed_version,
+        #                      { custom_values: :custom_field },
+        #                      :author,
+        #                      :assigned_to,
+        #                      :responsible,
+        #                      :watcher_users,
+        #                      :category,
+        #                      :attachments]
+
+        def to_json(*args)
+          json_rep = OpenProject::Cache.fetch(represented) do
+            super
+          end
+
+          hash_rep = ::JSON::load(json_rep)
+
+          link_conditions.each do |name, condition|
+            hash_rep['_links'].delete(name.to_s) unless instance_exec(&condition)
+          end
+          property_conditions.each do |name, condition|
+            hash_rep.delete(name.to_s) unless instance_exec(&condition)
+          end
+
+          ::JSON::dump(hash_rep)
+        end
       end
     end
   end

@@ -94,6 +94,7 @@ module API
             OpenProject::Cache::CacheKey.key('api/v3/work_packages/schemas',
                                              "#{represented.project.id}-#{represented.type.id}",
                                              I18n.locale,
+                                             Random.new.to_s,
                                              represented.type.updated_at,
                                              OpenProject::Cache::CacheKey.expand(custom_fields))
           end
@@ -254,11 +255,12 @@ module API
 
           def attribute_groups
             represented.attribute_groups.map do |group|
-              {
-                _type: "WorkPackageFormAttributeGroup",
-                name: group[0],
-                attributes: group[1]
-              }
+              klass = if group[1][0].is_a?(Query)
+                        ::API::V3::WorkPackages::Schema::FormConfigurations::QueryRepresenter
+                      else
+                        ::API::V3::WorkPackages::Schema::FormConfigurations::AttributeRepresenter
+                      end
+              klass.new(group, current_user: current_user, embed_links: true)
             end
           end
         end
